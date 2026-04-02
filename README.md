@@ -18,7 +18,7 @@ Part of the RCS (Remote Control Station) <-> UGV (Unmanned Ground Vehicle) commu
 SSH into your VPS and run:
 
 ```bash
-git clone https://github.com/YOUR_USER/Mosquitto-Broker-RBPi.git
+git clone https://github.com/0xFelipeGD/Mosquitto-Broker-RBPi.git
 cd Mosquitto-Broker-RBPi
 sudo ./setup.sh
 ```
