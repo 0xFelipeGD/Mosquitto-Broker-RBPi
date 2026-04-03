@@ -88,9 +88,11 @@ echo -e "\n${BOLD}5. Pub/Sub Test (TLS)${NC}"
 TEST_MSG="{\"test\":true,\"t\":$(date +%s)}"
 
 # Subscriber in background
+# --insecure skips hostname verification so the test works when the cert
+# was issued for the VPS external IP rather than "localhost".
 timeout 10 mosquitto_sub \
     --host localhost --port 8883 \
-    --cafile "$CA_FILE" \
+    --cafile "$CA_FILE" --insecure \
     --username "$UGV_USER" --pw "$UGV_PASS" \
     --topic "ugv/joystick" \
     -C 1 -W 8 \
@@ -102,7 +104,7 @@ sleep 2
 # Publish
 mosquitto_pub \
     --host localhost --port 8883 \
-    --cafile "$CA_FILE" \
+    --cafile "$CA_FILE" --insecure \
     --username "$RCS_USER" --pw "$RCS_PASS" \
     --topic "ugv/joystick" \
     --message "$TEST_MSG" 2>/dev/null || true
@@ -121,7 +123,7 @@ fi
 # Test reverse direction: ugv_client publishes telemetry, rcs_operator reads
 timeout 10 mosquitto_sub \
     --host localhost --port 8883 \
-    --cafile "$CA_FILE" \
+    --cafile "$CA_FILE" --insecure \
     --username "$RCS_USER" --pw "$RCS_PASS" \
     --topic "ugv/telemetry" \
     -C 1 -W 8 \
@@ -132,7 +134,7 @@ sleep 2
 
 mosquitto_pub \
     --host localhost --port 8883 \
-    --cafile "$CA_FILE" \
+    --cafile "$CA_FILE" --insecure \
     --username "$UGV_USER" --pw "$UGV_PASS" \
     --topic "ugv/telemetry" \
     --message "$TEST_MSG" 2>/dev/null || true
@@ -151,9 +153,12 @@ fi
 echo -e "\n${BOLD}6. Security Tests${NC}"
 
 # Anonymous should fail
+# --insecure is required here too: without it the TLS handshake fails before
+# auth is attempted, so the non-zero exit code would be a false PASS from a
+# TLS error rather than a genuine auth rejection.
 if timeout 5 mosquitto_pub \
     --host localhost --port 8883 \
-    --cafile "$CA_FILE" \
+    --cafile "$CA_FILE" --insecure \
     --topic "ugv/test" \
     --message "anon" 2>/dev/null; then
     fail "Anonymous publish was accepted (should be rejected!)"
@@ -164,7 +169,7 @@ fi
 # Wrong password should fail
 if timeout 5 mosquitto_pub \
     --host localhost --port 8883 \
-    --cafile "$CA_FILE" \
+    --cafile "$CA_FILE" --insecure \
     --username rcs_operator --pw "wrongpassword123" \
     --topic "ugv/test" \
     --message "bad" 2>/dev/null; then

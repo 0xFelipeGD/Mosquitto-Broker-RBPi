@@ -53,6 +53,8 @@ sudo ./test.sh
 
 Runs a full test suite: service status, port checks, TLS cert, pub/sub in both directions, and security tests (anonymous/wrong password rejection).
 
+> **Self-signed certs:** the script uses `--insecure` to bypass hostname verification on the loopback interface (the cert is issued for the VPS external IP, not `localhost`). TLS encryption and CA chain validation remain active. This is expected and correct for a local functional test.
+
 ### Connect the RCS
 
 In your RCS `config/config.yaml`:
@@ -74,6 +76,7 @@ mqtt:
 If you used self-signed TLS, copy the CA cert to each client machine:
 
 ```bash
+# Run this on your LOCAL machine (not inside the VPS SSH session)
 scp root@YOUR_VPS_IP:/etc/mosquitto/certs/ca.crt .
 ```
 
