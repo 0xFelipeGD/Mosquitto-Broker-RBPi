@@ -178,6 +178,27 @@ else
     ok "Wrong password rejected"
 fi
 
+# ── Test 7: Coturn STUN server (optional) ───────────────────
+echo -e "\n${BOLD}7. Coturn STUN Server (optional)${NC}"
+
+if command -v turnserver &>/dev/null; then
+    ok "Coturn is installed"
+
+    if systemctl is-active --quiet coturn; then
+        ok "Coturn service is active"
+    else
+        fail "Coturn service is NOT active"
+    fi
+
+    if ss -ulnp | grep -q ":3478" || ss -tlnp | grep -q ":3478"; then
+        ok "Port 3478 is listening"
+    else
+        fail "Port 3478 is NOT listening"
+    fi
+else
+    info "Coturn is not installed (skipping — run setup_coturn.sh to install)"
+fi
+
 # ── Summary ─────────────────────────────────────────────────
 echo ""
 if [[ $FAILURES -eq 0 ]]; then

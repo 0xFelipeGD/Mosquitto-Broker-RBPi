@@ -327,6 +327,12 @@ topic write ugv/heartbeat
 topic write ugv/ping
 topic read ugv/telemetry
 topic read ugv/pong
+topic write ugv/camera/cmd
+topic write ugv/camera/answer
+topic write ugv/camera/ice/rcs
+topic read ugv/camera/offer
+topic read ugv/camera/ice/ugv
+topic read ugv/camera/status
 
 # UGV client: subscribe to control commands, publish telemetry
 user ugv_client
@@ -335,6 +341,12 @@ topic read ugv/heartbeat
 topic read ugv/ping
 topic write ugv/telemetry
 topic write ugv/pong
+topic read ugv/camera/cmd
+topic read ugv/camera/answer
+topic read ugv/camera/ice/rcs
+topic write ugv/camera/offer
+topic write ugv/camera/ice/ugv
+topic write ugv/camera/status
 
 # Both users can read $SYS for monitoring
 pattern read $SYS/#
