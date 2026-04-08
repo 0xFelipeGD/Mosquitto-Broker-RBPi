@@ -214,14 +214,20 @@ chmod 640 "$PASSWD_FILE"
 # mosquitto_passwd -b needs the password on argv; pipe stdin isn't enough for
 # the bulk-add flow. We run three sequential `docker run` calls against a
 # temp file mounted into the container.
+#
+# Important: do NOT pre-create the temp passwd file. `mosquitto_passwd -c`
+# on recent mosquitto versions refuses to overwrite an existing file, so
+# leaving /work/passwd absent lets the first call create it cleanly. We
+# pass `--user` so the mosquitto container writes as the host user and
+# the file is readable by the subsequent cp.
 TMP_PASSWD_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_PASSWD_DIR"' EXIT
 TMP_PASSWD_FILE="$TMP_PASSWD_DIR/passwd"
-: > "$TMP_PASSWD_FILE"
 
 docker_passwd_add() {
     local user="$1" pass="$2" create_flag="${3:-}"
     docker run --rm \
+        --user "$(id -u):$(id -g)" \
         -v "$TMP_PASSWD_DIR:/work" \
         eclipse-mosquitto:2 \
         mosquitto_passwd ${create_flag} -b /work/passwd "$user" "$pass" >/dev/null
