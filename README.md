@@ -28,9 +28,10 @@ The wizard will ask you:
 1. **TLS mode** — Let's Encrypt (need a domain) or self-signed (works with IP)
 2. **Passwords** — for `rcs_operator` and `ugv_client` MQTT users
 3. **ACL** — enable topic-level access control (recommended)
-4. **Firewall** — configure UFW (recommended)
+4. **Coturn STUN+TURN** — install for WebRTC video NAT traversal (recommended)
+5. **Firewall** — configure UFW (recommended)
 
-That's it. Everything else is automatic.
+That's it. Everything else is automatic — Mosquitto and Coturn are installed by the same script in a single run.
 
 ## What the wizard does
 
@@ -39,7 +40,8 @@ That's it. Everything else is automatic.
 - Creates MQTT users with password authentication
 - Writes a hardened broker configuration (TLS-only on port 8883)
 - Sets up topic ACLs matching the RCS/UGV topic contract
-- Configures UFW firewall (blocks plaintext MQTT on 1883)
+- Optionally installs and configures **coturn** as a STUN+TURN server on port 3478 for the UGV camera WebRTC feed (TURN credentials: `ugv` / `ugvturn2026`, relay ports `49152-65535/udp`)
+- Configures UFW firewall (blocks plaintext MQTT on 1883, opens 8883/tcp and the coturn ports when enabled)
 - Runs a self-test to verify pub/sub over TLS
 - Saves credentials to `/etc/mosquitto/.credentials`
 

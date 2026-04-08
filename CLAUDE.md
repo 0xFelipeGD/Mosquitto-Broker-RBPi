@@ -36,8 +36,7 @@ Automated setup for Eclipse Mosquitto 2.0+ MQTT broker on a VPS Ubuntu server. P
 
 | File | Purpose |
 |------|---------|
-| `setup.sh` | Full automated installer (Mosquitto, TLS, users, ACL, firewall) |
-| `setup_coturn.sh` | Coturn STUN server installer (WebRTC NAT traversal) |
+| `setup.sh` | Full automated installer (Mosquitto, TLS, users, ACL, firewall, optional coturn) |
 | `test.sh` | Connectivity and pub/sub validation |
 | `uninstall.sh` | Clean removal |
 | `prompts/VPS_BROKER_SETUP.md` | Detailed implementation guide |
@@ -67,8 +66,7 @@ Automated setup for Eclipse Mosquitto 2.0+ MQTT broker on a VPS Ubuntu server. P
 ## Running
 
 ```bash
-sudo bash setup.sh         # Interactive Mosquitto installer on VPS
-sudo bash setup_coturn.sh  # Interactive coturn STUN server installer
+sudo bash setup.sh         # Single wizard: Mosquitto + optional coturn STUN+TURN
 bash test.sh               # Test connectivity (includes coturn check)
 sudo bash uninstall.sh     # Clean removal
 ```

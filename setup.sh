@@ -93,7 +93,7 @@ preflight() {
 
 # ── Step 1: Gather information ─────────────────────────────
 gather_info() {
-    banner "Step 1/6 — Configuration"
+    banner "Step 1/7 — Configuration"
 
     # TLS mode
     echo -e "  ${BOLD}TLS Certificate Options:${NC}"
@@ -102,6 +102,9 @@ gather_info() {
 
     local tls_choice
     tls_choice=$(ask "Choose TLS mode (1 or 2)" "1")
+
+    local detected_ip
+    detected_ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '/src/{for(i=1;i<=NF;i++)if($i=="src")print $(i+1);exit}' || hostname -I | awk '{print $1}')
 
     if [[ "$tls_choice" == "1" ]]; then
         TLS_MODE="letsencrypt"
@@ -115,8 +118,6 @@ gather_info() {
     else
         TLS_MODE="selfsigned"
         DOMAIN=""
-        local detected_ip
-        detected_ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '/src/{for(i=1;i<=NF;i++)if($i=="src")print $(i+1);exit}' || hostname -I | awk '{print $1}')
         BROKER_HOST=$(ask "VPS public IP address" "$detected_ip")
         info "Will use self-signed certificates for: $BROKER_HOST"
     fi
@@ -139,6 +140,29 @@ gather_info() {
         ENABLE_ACL=false
     fi
 
+    # Coturn (STUN+TURN for WebRTC video)
+    echo ""
+    echo -e "  ${BOLD}Coturn STUN+TURN server${NC} — needed for the UGV camera WebRTC feed"
+    echo -e "  to traverse NAT. Recommended unless you already run a STUN/TURN elsewhere."
+    ENABLE_COTURN=true
+    if ! ask_yn "Install coturn STUN+TURN server for WebRTC video?" "y"; then
+        ENABLE_COTURN=false
+    fi
+
+    if [[ "$ENABLE_COTURN" == true ]]; then
+        # Auto-detect external IP for coturn (use BROKER_HOST as default if it is an IP)
+        local default_ip="$detected_ip"
+        if [[ "$TLS_MODE" == "selfsigned" && "$BROKER_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            default_ip="$BROKER_HOST"
+        fi
+        VPS_EXTERNAL_IP=$(ask "VPS external IP address (for coturn)" "$default_ip")
+        if [[ -z "$VPS_EXTERNAL_IP" ]]; then
+            err "External IP cannot be empty for coturn."
+            exit 1
+        fi
+        TURN_REALM=$(ask "STUN/TURN realm (domain or IP)" "$VPS_EXTERNAL_IP")
+    fi
+
     # Firewall
     ENABLE_UFW=true
     if ! ask_yn "Configure UFW firewall?" "y"; then
@@ -152,6 +176,14 @@ gather_info() {
     echo -e "  MQTT port:      ${BOLD}8883${NC} (TLS)"
     echo -e "  Users:          ${BOLD}rcs_operator${NC}, ${BOLD}ugv_client${NC}"
     echo -e "  ACL:            ${BOLD}${ENABLE_ACL}${NC}"
+    echo -e "  Coturn:         ${BOLD}${ENABLE_COTURN}${NC}"
+    if [[ "$ENABLE_COTURN" == true ]]; then
+        echo -e "    External IP:  ${BOLD}${VPS_EXTERNAL_IP}${NC}"
+        echo -e "    Realm:        ${BOLD}${TURN_REALM}${NC}"
+        echo -e "    TURN port:    ${BOLD}3478${NC} (UDP+TCP)"
+        echo -e "    Relay ports:  ${BOLD}49152-65535/udp${NC}"
+        echo -e "    TURN user:    ${BOLD}ugv${NC}"
+    fi
     echo -e "  UFW firewall:   ${BOLD}${ENABLE_UFW}${NC}"
     echo ""
 
@@ -163,7 +195,7 @@ gather_info() {
 
 # ── Step 2: Install Mosquitto ──────────────────────────────
 install_mosquitto() {
-    banner "Step 2/6 — Installing Mosquitto"
+    banner "Step 2/7 — Installing Mosquitto"
 
     info "Adding Mosquitto PPA..."
     log_cmd apt-add-repository ppa:mosquitto-dev/mosquitto-ppa -y || true
@@ -194,7 +226,7 @@ MAINCONF
 
 # ── Step 3: TLS certificates ──────────────────────────────
 setup_tls() {
-    banner "Step 3/6 — TLS Certificates"
+    banner "Step 3/7 — TLS Certificates"
 
     mkdir -p /etc/mosquitto/certs
 
@@ -299,7 +331,7 @@ setup_tls_selfsigned() {
 
 # ── Step 4: Create MQTT users ──────────────────────────────
 create_users() {
-    banner "Step 4/6 — MQTT Users"
+    banner "Step 4/7 — MQTT Users"
 
     # Create password file with first user (-c = create new file)
     mosquitto_passwd -c -b /etc/mosquitto/passwd rcs_operator "$RCS_PASS"
@@ -315,7 +347,7 @@ create_users() {
 
 # ── Step 5: Write Mosquitto config ─────────────────────────
 write_config() {
-    banner "Step 5/6 — Mosquitto Configuration"
+    banner "Step 5/7 — Mosquitto Configuration"
 
     # ACL file
     if [[ "$ENABLE_ACL" == true ]]; then
@@ -413,9 +445,115 @@ CONF
     ok "Default plaintext listener disabled"
 }
 
-# ── Step 6: Firewall ───────────────────────────────────────
+# ── Step 6: Coturn STUN+TURN (optional) ───────────────────
+setup_coturn() {
+    banner "Step 6/7 — Coturn STUN+TURN Server"
+
+    if [[ "$ENABLE_COTURN" != true ]]; then
+        info "Coturn installation skipped (user choice)"
+        return
+    fi
+
+    info "Installing coturn..."
+    log_cmd apt-get install -y coturn
+
+    local version
+    version=$(turnserver --version 2>&1 | head -1 || echo "unknown")
+    ok "Installed: $version"
+
+    # Enable the coturn daemon
+    info "Enabling coturn daemon..."
+    if [[ -f /etc/default/coturn ]]; then
+        cp /etc/default/coturn /etc/default/coturn.bak
+        # Uncomment TURNSERVER_ENABLED=1 if commented, or add it
+        if grep -q "^#.*TURNSERVER_ENABLED=1" /etc/default/coturn; then
+            sed -i 's/^#.*TURNSERVER_ENABLED=1/TURNSERVER_ENABLED=1/' /etc/default/coturn
+        elif ! grep -q "^TURNSERVER_ENABLED=1" /etc/default/coturn; then
+            echo "TURNSERVER_ENABLED=1" >> /etc/default/coturn
+        fi
+    else
+        echo "TURNSERVER_ENABLED=1" > /etc/default/coturn
+    fi
+    ok "Coturn daemon enabled in /etc/default/coturn"
+
+    # Write turnserver.conf
+    info "Writing /etc/turnserver.conf..."
+    if [[ -f /etc/turnserver.conf ]]; then
+        cp /etc/turnserver.conf /etc/turnserver.conf.bak
+    fi
+
+    # Create log directory
+    mkdir -p /var/log/coturn
+
+    cat > /etc/turnserver.conf <<CONF
+# ============================================================
+# Coturn STUN + TURN Server Configuration
+# Generated by Mosquitto setup wizard on $(date -Iseconds)
+# Mode: STUN + TURN relay
+# ============================================================
+
+# -- Listening ----------------------------------------------
+listening-port=3478
+
+# -- External IP / Realm ------------------------------------
+external-ip=${VPS_EXTERNAL_IP}
+realm=${TURN_REALM}
+
+# -- Authentication (long-term credentials for TURN) --------
+lt-cred-mech
+user=ugv:ugvturn2026
+
+# -- No TLS (MQTT already uses TLS; TURN relay is UDP/TCP) --
+no-tls
+no-dtls
+
+# -- TURN relay ---------------------------------------------
+relay-ip=${VPS_EXTERNAL_IP}
+min-port=49152
+max-port=65535
+
+# -- Security -----------------------------------------------
+fingerprint
+no-multicast-peers
+
+# -- Disable the telnet CLI interface -----------------------
+no-cli
+
+# -- Logging ------------------------------------------------
+log-file=/var/log/coturn/turnserver.log
+verbose
+CONF
+
+    ok "Coturn configuration written: /etc/turnserver.conf"
+
+    # Enable and start service
+    info "Enabling and starting coturn service..."
+    systemctl enable coturn >> "$LOG_FILE" 2>&1
+    systemctl restart coturn >> "$LOG_FILE" 2>&1
+
+    sleep 2
+
+    if systemctl is-active --quiet coturn; then
+        ok "Coturn service is running"
+    else
+        err "Coturn failed to start! Check logs:"
+        journalctl -u coturn -n 20 --no-pager
+        echo ""
+        err "Full setup log: $LOG_FILE"
+        exit 1
+    fi
+
+    # Verify port 3478
+    if ss -ulnp | grep -q ":3478" || ss -tlnp | grep -q ":3478"; then
+        ok "Port 3478 is listening (STUN/TURN)"
+    else
+        warn "Port 3478 not detected — check logs"
+    fi
+}
+
+# ── Step 7: Firewall ───────────────────────────────────────
 setup_firewall() {
-    banner "Step 6/6 — Firewall"
+    banner "Step 7/7 — Firewall"
 
     if [[ "$ENABLE_UFW" != true ]]; then
         warn "Firewall configuration skipped (user choice)"
@@ -431,11 +569,23 @@ setup_firewall() {
     ufw allow 8883/tcp >> "$LOG_FILE" 2>&1
     ufw deny 1883/tcp >> "$LOG_FILE" 2>&1
 
+    if [[ "$ENABLE_COTURN" == true ]]; then
+        info "Adding coturn firewall rules..."
+        ufw allow 3478/udp >> "$LOG_FILE" 2>&1 || true
+        ufw allow 3478/tcp >> "$LOG_FILE" 2>&1 || true
+        ufw allow 49152:65535/udp >> "$LOG_FILE" 2>&1 || true
+    fi
+
     # Enable non-interactively
     echo "y" | ufw enable >> "$LOG_FILE" 2>&1 || true
 
-    ok "UFW configured: 22/tcp ALLOW, 8883/tcp ALLOW, 1883/tcp DENY"
-    ufw status | grep -E "(22|1883|8883|Status)" || true
+    if [[ "$ENABLE_COTURN" == true ]]; then
+        ok "UFW configured: 22/tcp ALLOW, 8883/tcp ALLOW, 1883/tcp DENY, 3478/udp+tcp ALLOW, 49152-65535/udp ALLOW"
+        ufw status | grep -E "(22|1883|8883|3478|49152|Status)" || true
+    else
+        ok "UFW configured: 22/tcp ALLOW, 8883/tcp ALLOW, 1883/tcp DENY"
+        ufw status | grep -E "(22|1883|8883|Status)" || true
+    fi
 }
 
 # ── Start & Test ───────────────────────────────────────────
@@ -543,17 +693,36 @@ save_credentials() {
 print_summary() {
     banner "Setup Complete!"
 
-    echo -e "  ${GREEN}Mosquitto MQTT broker is running and secured.${NC}\n"
+    echo -e "  ${GREEN}Mosquitto MQTT broker is running and secured.${NC}"
+    if [[ "$ENABLE_COTURN" == true ]]; then
+        echo -e "  ${GREEN}Coturn STUN+TURN server is running for WebRTC video.${NC}"
+    else
+        echo -e "  ${YELLOW}Coturn STUN+TURN server: skipped${NC}"
+    fi
+    echo ""
 
-    echo -e "  ${BOLD}Connection Details:${NC}"
+    echo -e "  ${BOLD}MQTT Broker Connection Details:${NC}"
     echo -e "    Host:     ${CYAN}${BROKER_HOST}${NC}"
     echo -e "    Port:     ${CYAN}8883${NC}"
     echo -e "    TLS:      ${CYAN}${TLS_MODE}${NC}"
     echo ""
-    echo -e "  ${BOLD}Users:${NC}"
+    echo -e "  ${BOLD}MQTT Users:${NC}"
     echo -e "    rcs_operator  (for the Remote Control Station)"
     echo -e "    ugv_client    (for the Raspberry Pi / UGV)"
     echo ""
+
+    if [[ "$ENABLE_COTURN" == true ]]; then
+        echo -e "  ${BOLD}STUN+TURN Server (WebRTC video):${NC}"
+        echo -e "    External IP:  ${CYAN}${VPS_EXTERNAL_IP}${NC}"
+        echo -e "    Port:         ${CYAN}3478${NC} (UDP + TCP)"
+        echo -e "    Realm:        ${CYAN}${TURN_REALM}${NC}"
+        echo -e "    TURN user:    ${CYAN}ugv${NC}"
+        echo -e "    TURN secret:  ${CYAN}ugvturn2026${NC}"
+        echo -e "    Relay ports:  ${CYAN}49152-65535${NC} (UDP)"
+        echo -e "    STUN URL:     ${CYAN}stun:${VPS_EXTERNAL_IP}:3478${NC}"
+        echo -e "    TURN URL:     ${CYAN}turn:${VPS_EXTERNAL_IP}:3478${NC}"
+        echo ""
+    fi
 
     if [[ "$TLS_MODE" == "selfsigned" ]]; then
         echo -e "  ${BOLD}${YELLOW}IMPORTANT:${NC} Copy the CA certificate to your clients:"
@@ -574,13 +743,26 @@ print_summary() {
     else
         echo -e "    ${CYAN}    ca_certs: \"\"  # empty = system CAs${NC}"
     fi
+    if [[ "$ENABLE_COTURN" == true ]]; then
+        echo -e "    ${CYAN}camera:${NC}"
+        echo -e "    ${CYAN}  stun_servers:${NC}"
+        echo -e "    ${CYAN}    - \"stun:${VPS_EXTERNAL_IP}:3478\"${NC}"
+        echo -e "    ${CYAN}  turn_servers:${NC}"
+        echo -e "    ${CYAN}    - url: \"turn:${VPS_EXTERNAL_IP}:3478\"${NC}"
+        echo -e "    ${CYAN}      username: \"ugv\"${NC}"
+        echo -e "    ${CYAN}      credential: \"ugvturn2026\"${NC}"
+    fi
     echo ""
 
     echo -e "  ${BOLD}Useful commands:${NC}"
-    echo -e "    Status:   ${CYAN}sudo systemctl status mosquitto${NC}"
-    echo -e "    Logs:     ${CYAN}sudo journalctl -u mosquitto -f${NC}"
-    echo -e "    Test:     ${CYAN}sudo ${SCRIPT_DIR}/test.sh${NC}"
-    echo -e "    Uninstall:${CYAN}sudo ${SCRIPT_DIR}/uninstall.sh${NC}"
+    echo -e "    Mosquitto status: ${CYAN}sudo systemctl status mosquitto${NC}"
+    echo -e "    Mosquitto logs:   ${CYAN}sudo journalctl -u mosquitto -f${NC}"
+    if [[ "$ENABLE_COTURN" == true ]]; then
+        echo -e "    Coturn status:    ${CYAN}sudo systemctl status coturn${NC}"
+        echo -e "    Coturn logs:      ${CYAN}sudo journalctl -u coturn -f${NC}"
+    fi
+    echo -e "    Test:             ${CYAN}sudo ${SCRIPT_DIR}/test.sh${NC}"
+    echo -e "    Uninstall:        ${CYAN}sudo ${SCRIPT_DIR}/uninstall.sh${NC}"
     echo ""
 
     echo -e "  Credentials saved to: ${YELLOW}/etc/mosquitto/.credentials${NC}"
@@ -596,6 +778,7 @@ main() {
     setup_tls
     create_users
     write_config
+    setup_coturn
     setup_firewall
     start_and_test
     save_credentials

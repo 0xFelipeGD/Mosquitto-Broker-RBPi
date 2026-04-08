@@ -196,7 +196,7 @@ if command -v turnserver &>/dev/null; then
         fail "Port 3478 is NOT listening"
     fi
 else
-    info "Coturn is not installed (skipping — run setup_coturn.sh to install)"
+    info "Coturn is not installed (skipping — re-run setup.sh and answer Y to install it)"
 fi
 
 # ── Summary ─────────────────────────────────────────────────

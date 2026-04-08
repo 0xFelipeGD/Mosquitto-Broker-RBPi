@@ -41,3 +41,40 @@ to future maintainers.
 
 The fix is strictly minimal. No other logic, structure, or test coverage was
 altered.
+
+## CHANGE-002 — Consolidate setup_coturn.sh into setup.sh
+
+**Date:** 2026-04-08
+**Files:** `setup.sh`, `setup_coturn.sh` (deleted), `README.md`, `CLAUDE.md`, `test.sh`
+**Severity:** UX improvement — single-script wizard
+
+### Motivation
+
+Operators previously had to run two scripts on the VPS (`setup.sh` followed by
+`setup_coturn.sh`) to bring up the broker plus the STUN/TURN server needed for
+the WebRTC camera feed. This was error-prone and easy to forget.
+
+### Change
+
+Merged the entire `setup_coturn.sh` flow into `setup.sh` as an optional Step 6
+inside the existing wizard. The wizard now has 7 steps total:
+
+1. Configuration (TLS, MQTT users, ACL, **coturn opt-in**, UFW)
+2. Install Mosquitto
+3. TLS certificates
+4. Create MQTT users
+5. Write Mosquitto config (ACL + rcs.conf)
+6. **Install + configure coturn (optional, default Y)**
+7. Firewall (handles 8883/tcp + 3478/udp+tcp + 49152-65535/udp when coturn enabled)
+
+The coturn prompt defaults to Yes. Credentials remain `ugv` / `ugvturn2026`.
+External IP is auto-detected (or reused from the broker host when self-signed).
+The UFW step was reordered to run AFTER coturn so a single firewall pass opens
+both Mosquitto and coturn ports atomically.
+
+The final summary now reports coturn status (installed/skipped) and prints the
+STUN/TURN URLs plus the matching `camera:` block for `config.yaml`.
+
+`setup_coturn.sh` was deleted. `README.md`, `CLAUDE.md` and `test.sh` were
+updated to reference only `setup.sh`. No mosquitto behavior (TLS modes, users,
+ACL, ports, limits) was changed.
