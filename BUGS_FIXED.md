@@ -1,5 +1,66 @@
 # BUGS_FIXED — Mosquitto-Broker-RBPi
 
+## CHANGE-005 — Fresh-VPS deploy fixes
+
+**Date:** 2026-04-08
+**Files:** `init.sh`, `docker-compose.yml`, `deploy.sh`
+**Severity:** Deployment — four blockers found while deploying to a clean Ubuntu VPS
+
+### Motivation
+
+The CHANGE-004 wizard worked end-to-end on a developer machine but hit four
+distinct failures on a brand-new VPS. Each one stopped `bash deploy.sh`
+midway and required manual intervention. They all surfaced together because
+the cleanroom environment had no leftover state to mask them.
+
+### Change
+
+1. **`6a335d5` — `init.sh` `mosquitto_passwd` file-exists bug.** The script
+   was pre-creating an empty `TMP_PASSWD_FILE` and then calling
+   `mosquitto_passwd -c`, which on recent mosquitto refuses to overwrite an
+   existing file. Removed the pre-creation; let `mosquitto_passwd -c` create
+   the file fresh on its first call. Also added `--user $(id -u):$(id -g)`
+   to the `docker run eclipse-mosquitto` invocation so the resulting passwd
+   file is owned by the host user and the subsequent `cp` can read it
+   without sudo.
+
+2. **`ce698d6` — container read-permission bug.** The mosquitto container
+   runs as UID 1883 inside its own namespace, which maps to "other" relative
+   to whoever owns the host bind-mounted files. The previous `chmod 640` on
+   passwd, ACL, `ca.crt`, `server.crt`, and `server.key` made the files
+   unreadable from inside the container, so mosquitto refused to start.
+   Switched all five to `chmod 644`. `ca.key` stays `chmod 600` because it
+   is only used locally by openssl at init time and never mounted into any
+   container. Also added `sys_interval 2` to `rcs.conf` so
+   `$SYS/broker/uptime` publishes every 2s — the healthcheck `mosquitto_sub`
+   uses a 5s `-W` window, and the default 10s sys_interval left a race
+   window where the probe could time out before any uptime message arrived.
+
+3. **`c8913bf` — coturn healthcheck bug.** The `coturn/coturn` Debian slim
+   image does NOT ship `nc` (netcat). The previous healthcheck
+   `nc -zu 127.0.0.1 3478` therefore exited 127 ("command not found") and
+   the container was reported unhealthy forever, even when the relay was
+   working perfectly. Replaced it with
+   `timeout 3 turnutils_stunclient -p 3478 127.0.0.1` — a real STUN binding
+   request issued with coturn's own utility, which is guaranteed to be
+   present in the image. The `timeout` wrapper bounds the probe so a hung
+   coturn cannot stall the healthcheck.
+
+4. **`209d6af` — `deploy.sh` host mosquitto-clients install.** Without
+   `mosquitto-clients` on the host, `test.sh` falls back to
+   `docker compose exec mosquitto mosquitto_sub ...`. That fallback has a
+   latent signal-propagation bug: a `timeout`-killed `docker exec` leaves
+   the in-container `mosquitto_sub` running, and the host-side `wait` then
+   hangs indefinitely. Made `deploy.sh` apt-install `mosquitto-clients`
+   during the Docker install step (~200 KB) so `test.sh` always uses the
+   native host clients and finishes in under 5 seconds.
+
+### Result
+
+A `bash deploy.sh` run on a freshly-provisioned Ubuntu VPS now goes from
+`apt update` to "two healthy containers + smoke test passed" in roughly two
+minutes with zero manual intervention.
+
 ## CHANGE-004 — Add deploy.sh one-shot wizard
 
 **Date:** 2026-04-08
@@ -8,7 +69,7 @@
 
 ### Motivation
 
-The Dockerized stack already collapsed deployment to ~6 manual steps (clone, edit `.env`, `init.sh`, `compose up`, `ufw` rules, `test.sh`), but operators still had to read SETUP_GUIDE.md, hand-edit `.env`, and remember the firewall ports. Bringing up a fresh VPS therefore took ~10 minutes of careful copy-paste, and any mistake (wrong IP in the cert SAN, weak passwords, forgotten UFW rule) only surfaced later as opaque TLS failures or unreachable TURN.
+The Dockerized stack already collapsed deployment to ~6 manual steps (clone, edit `.env`, `init.sh`, `compose up`, `ufw` rules, `test.sh`), but operators still had to read the root SETUP_GUIDE.md in the parent repo, hand-edit `.env`, and remember the firewall ports. Bringing up a fresh VPS therefore took ~10 minutes of careful copy-paste, and any mistake (wrong IP in the cert SAN, weak passwords, forgotten UFW rule) only surfaced later as opaque TLS failures or unreachable TURN.
 
 ### Change
 
@@ -93,7 +154,7 @@ altered.
 **Date:** 2026-04-08
 **Files:** `docker-compose.yml` (new), `init.sh` (new), `.env.example` (new),
 `.gitignore` (new), `test.sh` (rewritten), `README.md` (rewritten),
-`CLAUDE.md` (rewritten), `setup.sh` (deleted)
+`CLAUDE.md` (rewritten), `setup.sh` (deleted), `uninstall.sh` (deleted)
 **Severity:** Deployment — reproducibility + ops
 
 ### Motivation
@@ -116,7 +177,10 @@ stack plus a one-shot bootstrap script:
    - mosquitto: TLS `mosquitto_sub` on `$SYS/broker/uptime` using a dedicated
      `health` user with a random password (isolated from the two real users so
      a broken healthcheck cannot lock the operator out).
-   - coturn: `nc -zu 127.0.0.1 3478`.
+   - coturn: `turnutils_stunclient -p 3478 127.0.0.1` (a real STUN binding
+     request issued with coturn's own tools — guaranteed available inside the
+     `coturn/coturn` image). See CHANGE-005 for the follow-up fixes that
+     replaced an earlier `nc`-based probe which broke on the slim image.
 
 2. **`.env.example` + `.env`** — single source of secrets. Required:
    `VPS_EXTERNAL_IP`, `RCS_OPERATOR_PASSWORD`, `UGV_CLIENT_PASSWORD`.

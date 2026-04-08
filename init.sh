@@ -218,8 +218,6 @@ CONF
 info "Generating passwd file via eclipse-mosquitto:2 container..."
 
 PASSWD_FILE="data/mosquitto/config/passwd"
-: > "$PASSWD_FILE"
-chmod 640 "$PASSWD_FILE"
 
 # mosquitto_passwd -b needs the password on argv; pipe stdin isn't enough for
 # the bulk-add flow. We run three sequential `docker run` calls against a

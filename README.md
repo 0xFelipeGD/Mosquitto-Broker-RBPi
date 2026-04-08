@@ -146,7 +146,6 @@ This nukes certs, persistence, and logs. `.env` is preserved.
 | `.env.example` | Template for secrets and settings |
 | `init.sh` | Bootstrap: populates `data/` from `.env` |
 | `test.sh` | Docker-aware smoke test |
-| `uninstall.sh` | Legacy cleanup for pre-Docker installs |
 | `data/` | Generated at runtime (gitignored — contains secrets) |
 
 ## MQTT interface contract

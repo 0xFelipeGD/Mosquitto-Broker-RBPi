@@ -316,6 +316,8 @@ install_docker() {
 }
 
 # ── 4. Legacy native-install cleanup ─────────────────────────────────────────
+# Replaces the deleted uninstall.sh from the pre-Docker era — detects a native
+# mosquitto/coturn install and offers to purge it so host ports 8883/3478 are free.
 cleanup_legacy() {
     hr
     info "Step 4 — Legacy native-install detection"
