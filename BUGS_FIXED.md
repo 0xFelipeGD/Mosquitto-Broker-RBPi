@@ -1,5 +1,51 @@
 # BUGS_FIXED — Mosquitto-Broker-RBPi
 
+## CHANGE-004 — Add deploy.sh one-shot wizard
+
+**Date:** 2026-04-08
+**File:** `deploy.sh` (new), `README.md`, `CLAUDE.md`
+**Severity:** Deployment UX — reduces friction from "read the guide and copy-paste 8 commands" to "one command"
+
+### Motivation
+
+The Dockerized stack already collapsed deployment to ~6 manual steps (clone, edit `.env`, `init.sh`, `compose up`, `ufw` rules, `test.sh`), but operators still had to read SETUP_GUIDE.md, hand-edit `.env`, and remember the firewall ports. Bringing up a fresh VPS therefore took ~10 minutes of careful copy-paste, and any mistake (wrong IP in the cert SAN, weak passwords, forgotten UFW rule) only surfaced later as opaque TLS failures or unreachable TURN.
+
+### Change
+
+Added `deploy.sh` — a single, idempotent, interactive wizard that handles every deployment step in order:
+
+1. **Pre-flight** — verifies repo layout, Linux + Ubuntu/Debian, root or sudo access.
+2. **Plan summary + confirmation** — prints what it's about to do and asks `Proceed? [Y/n]`.
+3. **Docker install (idempotent)** — checks `docker compose version`, installs via `get.docker.com` if missing, enables the daemon, optionally adds the invoking user to the `docker` group.
+4. **Legacy cleanup (optional)** — detects native mosquitto/coturn (apt packages, systemd units, `/etc/mosquitto`, `/etc/turnserver.conf`) and offers to purge them so the host ports are free.
+5. **Interactive `.env` build** — auto-detects the public IP via `api.ipify.org` (with two fallbacks), validates IPv4 format, prompts for both MQTT passwords with confirmation and an 8-char minimum (and rejects identical RCS/UGV passwords), prompts for the TURN username, and **auto-generates a strong TURN password** instead of silently using the `ugvturn2026` placeholder. Existing `.env` files can be reused, edited, or overwritten. The final file is `chmod 600`.
+6. **Bootstrap + start** — runs `init.sh`, `docker compose pull`, `docker compose up -d`, then polls `docker inspect ... .State.Health.Status` for both `rcs-mosquitto` and `rcs-coturn` for up to 60s, printing a progress dot every 2s. Aborts with a clear message and a pointer to `docker compose logs` on timeout.
+7. **UFW rules (optional)** — applies the canonical rule set (allow 22/8883/3478/49152-65535, deny 1883, force-enable) and prints `ufw status verbose` afterwards.
+8. **Smoke test** — runs `test.sh` but does not abort on failure (the stack is already up; the operator can inspect).
+9. **Summary** — prints VPS IP, MQTT/TLS endpoint, STUN/TURN URLs, both MQTT users, the auto-generated TURN credentials, the CA cert path, a copy-pasteable `scp` command for the operator PC, the next steps (copy `ca.crt`, configure RCS/UGV `config.yaml`), and an operations cheatsheet.
+
+### Non-interactive mode
+
+The wizard accepts `--non-interactive` (also `--yes` / `-y`) and reads all values from environment variables (`VPS_EXTERNAL_IP`, `RCS_OPERATOR_PASSWORD`, `UGV_CLIENT_PASSWORD`, optional `TURN_*`, `CONFIGURE_UFW`, `CLEANUP_LEGACY`, `INSTALL_DOCKER`). Missing required values cause an immediate error. The implementation is a single global `INTERACTIVE` flag plus an `ask` helper that wraps every prompt — small and self-contained.
+
+### New flow on the VPS
+
+```
+ssh root@<VPS_IP>
+git clone -b feature/broker-docker https://github.com/0xFelipeGD/Mosquitto-Broker-RBPi.git
+cd Mosquitto-Broker-RBPi
+bash deploy.sh
+```
+
+That is the entire operator workflow. The previous `init.sh` + `compose up` + manual UFW + `test.sh` flow is still documented in README.md for advanced users who want step-by-step control.
+
+### Files touched
+
+- `deploy.sh` — new, executable
+- `README.md` — added "Quick deploy" section at the top, renamed the old "First-time setup" section to "Manual deploy (advanced)", added `deploy.sh` to the Files table
+- `CLAUDE.md` — added `deploy.sh` row to the Key Files table
+- `BUGS_FIXED.md` — this entry
+
 ## BUG-001 — TLS hostname mismatch in test.sh causes false failures and false passes
 
 **Date:** 2026-04-03

@@ -41,6 +41,7 @@ A third user, `health` (default), has read-only access to `$SYS/broker/uptime` a
 
 | File | Purpose |
 |------|---------|
+| `deploy.sh` | One-shot deploy wizard: Docker install, `.env` build, `init.sh`, `compose up`, UFW, smoke test, summary. Interactive by default; supports `--non-interactive` for CI/CD |
 | `docker-compose.yml` | Two-service stack with healthchecks and restart policies |
 | `.env.example` | Template for all secrets and runtime settings |
 | `init.sh` | Bootstrap: reads `.env`, produces everything under `data/` |

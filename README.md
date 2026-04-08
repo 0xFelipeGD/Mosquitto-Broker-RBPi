@@ -7,13 +7,39 @@ Containerized deployment of the RCS <-> UGV message broker. Runs two services vi
 
 All runtime state (certs, password file, ACLs, persistence, logs) lives under `./data/` and is produced by `init.sh` from a single `.env` file.
 
+## Quick deploy (recommended)
+
+On a fresh Ubuntu/Debian VPS, three commands take you from "nothing installed" to "two healthy containers + firewall rules in place":
+
+```bash
+ssh root@<VPS_IP>
+git clone -b feature/broker-docker https://github.com/0xFelipeGD/Mosquitto-Broker-RBPi.git
+cd Mosquitto-Broker-RBPi
+bash deploy.sh
+```
+
+`deploy.sh` is an interactive wizard that:
+
+- Installs Docker + the compose plugin (if missing)
+- Detects and offers to remove any prior native mosquitto/coturn install
+- Builds `.env` interactively (auto-detects the public IP, generates a strong TURN password)
+- Runs `init.sh` to generate certs, configs, ACL, passwd
+- Brings the stack up with `docker compose up -d` and waits until both containers report `healthy`
+- Configures UFW firewall rules
+- Runs `test.sh` to validate end-to-end TLS pub/sub
+- Prints credentials, URLs, and the next steps
+
+For non-interactive use (CI/CD), run `bash deploy.sh --non-interactive` with `VPS_EXTERNAL_IP`, `RCS_OPERATOR_PASSWORD`, and `UGV_CLIENT_PASSWORD` set in the environment.
+
+The manual flow below remains supported for advanced users who want to control each step.
+
 ## Requirements
 
 - Docker 20.10+ with the `compose` plugin (`docker compose version`)
 - `openssl` (used by `init.sh` to generate self-signed certs)
 - Outbound internet access to pull the two images on first run
 
-## First-time setup
+## Manual deploy (advanced)
 
 ```bash
 git clone https://github.com/0xFelipeGD/Mosquitto-Broker-RBPi.git
@@ -115,6 +141,7 @@ This nukes certs, persistence, and logs. `.env` is preserved.
 
 | Path | Purpose |
 |------|---------|
+| `deploy.sh` | One-shot wizard: Docker install, .env build, init, up, UFW, smoke test |
 | `docker-compose.yml` | Two-service stack (mosquitto + coturn) with healthchecks |
 | `.env.example` | Template for secrets and settings |
 | `init.sh` | Bootstrap: populates `data/` from `.env` |
