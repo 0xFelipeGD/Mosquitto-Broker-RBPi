@@ -148,8 +148,12 @@ else
 
     rm -f "$CERT_DIR/server.csr" "$CERT_DIR/ca.srl"
 
-    chmod 644 "$CERT_DIR/ca.crt" "$CERT_DIR/server.crt"
-    chmod 640 "$CERT_DIR/ca.key" "$CERT_DIR/server.key"
+    # ca.crt, server.crt, server.key all need to be readable by the mosquitto
+    # user (UID 1883) inside the container. The container runs as "other"
+    # relative to whoever owns the host files, so 0644 is required. ca.key is
+    # only used locally by openssl at init time and can stay restrictive.
+    chmod 644 "$CERT_DIR/ca.crt" "$CERT_DIR/server.crt" "$CERT_DIR/server.key"
+    chmod 600 "$CERT_DIR/ca.key"
 
     ok "Self-signed certs written to $CERT_DIR/"
 fi
@@ -202,6 +206,12 @@ log_type notice
 
 # -- Connection limits -------------------------------------------------------
 max_connections 10
+
+# -- $SYS publish rate -------------------------------------------------------
+# Faster than the default 10s so the container healthcheck (which subscribes
+# to $SYS/broker/uptime with a 5s -W window) always catches at least one
+# message per probe.
+sys_interval 2
 CONF
 
 # ── 8. passwd (hashed via mosquitto_passwd inside eclipse-mosquitto:2) ───────
@@ -239,7 +249,10 @@ docker_passwd_add "ugv_client"   "$UGV_CLIENT_PASSWORD"   ""
 docker_passwd_add "$HEALTH_USER" "$HEALTH_PASSWORD"       ""
 
 cp "$TMP_PASSWD_FILE" "$PASSWD_FILE"
-chmod 640 "$PASSWD_FILE"
+# 0644 so the mosquitto user (UID 1883) inside the container can read the
+# file. The hashes inside are not secrets in the usual sense — they're the
+# same thing every mosquitto deployment has in /etc/mosquitto/passwd.
+chmod 644 "$PASSWD_FILE"
 
 ok "passwd written with users: rcs_operator, ugv_client, $HEALTH_USER"
 
@@ -286,7 +299,7 @@ topic read \$SYS/broker/uptime
 # Both real users can read \$SYS for monitoring
 pattern read \$SYS/#
 ACL
-chmod 640 data/mosquitto/config/acl
+chmod 644 data/mosquitto/config/acl
 
 # ── 10. turnserver.conf ──────────────────────────────────────────────────────
 info "Writing data/coturn/turnserver.conf..."

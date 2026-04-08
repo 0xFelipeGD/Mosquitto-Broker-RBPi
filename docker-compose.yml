@@ -65,9 +65,13 @@ services:
       - ./data/coturn/turnserver.conf:/etc/turnserver.conf:ro
       - ./data/coturn/log:/var/log
     healthcheck:
-      # coturn/coturn ships busybox nc. UDP check on 3478 is the canonical
-      # liveness signal: turnserver(1) binds the STUN/TURN listener there.
-      test: ["CMD-SHELL", "nc -zu 127.0.0.1 3478 || exit 1"]
+      # turnserver binds BOTH TCP and UDP on the listening-port. We use the
+      # TCP check because `nc -zu` for UDP is unreliable — UDP has no
+      # handshake, so the test depends on an ICMP port-unreachable being
+      # returned when the port is closed, which many firewalls drop. TCP
+      # 3478 is the canonical liveness signal: if turnserver is alive, it's
+      # bound there.
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 3478 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
