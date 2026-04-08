@@ -91,8 +91,9 @@ stack plus a one-shot bootstrap script:
    `docker compose exec mosquitto` as fallback, and verifies coturn is
    listening on UDP 3478.
 
-5. **`setup.sh` deleted**. `uninstall.sh` retained as a legacy cleanup tool
-   for operators who had a pre-Docker install to remove.
+5. **`setup.sh` and `uninstall.sh` deleted.** Full rollback is now
+   `docker compose down && rm -rf data/ .env` — no host cleanup needed
+   because nothing was ever installed on the host in the first place.
 
 6. **UFW is the operator's responsibility** — documented in README but not
    touched by any script. This separation is intentional: one layer per tool.
