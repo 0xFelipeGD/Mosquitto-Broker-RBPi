@@ -290,6 +290,29 @@ install_docker() {
             fi
         fi
     fi
+
+    # Install host mosquitto-clients so test.sh (step 8) can run the TLS
+    # pub/sub round-trip natively on the host instead of falling back to
+    # `docker compose exec mosquitto ...`. The exec-fallback path has a
+    # latent signal-propagation bug (timeout-killed exec processes can
+    # linger inside the container and the host-side `wait` hangs), which
+    # manifests as a frozen smoke test. mosquitto-clients is ~200 KB and
+    # ships in the default Ubuntu/Debian repos.
+    if ! command -v mosquitto_pub >/dev/null 2>&1 || ! command -v mosquitto_sub >/dev/null 2>&1; then
+        info "installing host mosquitto-clients (for test.sh smoke test)..."
+        if command -v apt-get >/dev/null 2>&1; then
+            $SUDO apt-get update -qq >/dev/null 2>&1 || true
+            if $SUDO apt-get install -y -qq mosquitto-clients >/dev/null 2>&1; then
+                ok "mosquitto-clients installed"
+            else
+                warn "apt install mosquitto-clients failed — test.sh will fall back to docker exec"
+            fi
+        else
+            warn "no apt-get on this system — test.sh will fall back to docker exec"
+        fi
+    else
+        ok "mosquitto-clients already installed: $(mosquitto_pub --help 2>&1 | head -n1 | awk '{print $2" "$3}')"
+    fi
 }
 
 # ── 4. Legacy native-install cleanup ─────────────────────────────────────────
