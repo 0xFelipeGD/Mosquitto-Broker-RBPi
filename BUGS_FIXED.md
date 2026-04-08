@@ -42,6 +42,75 @@ to future maintainers.
 The fix is strictly minimal. No other logic, structure, or test coverage was
 altered.
 
+## CHANGE-003 — Containerize broker with docker-compose
+
+**Date:** 2026-04-08
+**Files:** `docker-compose.yml` (new), `init.sh` (new), `.env.example` (new),
+`.gitignore` (new), `test.sh` (rewritten), `README.md` (rewritten),
+`CLAUDE.md` (rewritten), `setup.sh` (deleted)
+**Severity:** Deployment — reproducibility + ops
+
+### Motivation
+
+The old `setup.sh` interactive wizard required root on the VPS, modified the
+host system (apt, systemd, UFW, /etc/mosquitto), and was brittle across Ubuntu
+releases. Reproducing the same install on a new VPS meant walking through ~15
+prompts while hoping the PPA still existed. Rollback was manual.
+
+### Change
+
+Replaced the entire interactive installer with a two-service docker compose
+stack plus a one-shot bootstrap script:
+
+1. **`docker-compose.yml`** — `mosquitto` (eclipse-mosquitto:2) on a bridge
+   network exposing 8883, and `coturn` (coturn/coturn:latest) using
+   `network_mode: host` so the TURN relay port range (49152-65535/udp) and
+   external-ip advertisement work. Both services have `restart: unless-stopped`
+   and real healthchecks:
+   - mosquitto: TLS `mosquitto_sub` on `$SYS/broker/uptime` using a dedicated
+     `health` user with a random password (isolated from the two real users so
+     a broken healthcheck cannot lock the operator out).
+   - coturn: `nc -zu 127.0.0.1 3478`.
+
+2. **`.env.example` + `.env`** — single source of secrets. Required:
+   `VPS_EXTERNAL_IP`, `RCS_OPERATOR_PASSWORD`, `UGV_CLIENT_PASSWORD`.
+   `.env` is gitignored.
+
+3. **`init.sh`** — idempotent bootstrap: validates `.env`, generates a
+   self-signed CA + server cert (SAN includes both IP and hostname when they
+   differ), writes `mosquitto.conf` + `conf.d/rcs.conf`, builds the `passwd`
+   file by invoking `mosquitto_passwd` inside the eclipse-mosquitto image
+   (so the host doesn't need mosquitto-clients installed), writes the ACL
+   (matching INTERFACE_CONTRACT.md plus a read-only `$SYS/broker/uptime` entry
+   for the health user), and writes `turnserver.conf`. Re-running is a no-op
+   for existing certs; passwords are always re-applied so rotation is a
+   one-command flow.
+
+4. **`test.sh`** — rewritten: checks `docker compose ps` healthy state, runs
+   a TLS pub/sub round trip using host mosquitto-clients when available or
+   `docker compose exec mosquitto` as fallback, and verifies coturn is
+   listening on UDP 3478.
+
+5. **`setup.sh` deleted**. `uninstall.sh` retained as a legacy cleanup tool
+   for operators who had a pre-Docker install to remove.
+
+6. **UFW is the operator's responsibility** — documented in README but not
+   touched by any script. This separation is intentional: one layer per tool.
+
+### New deploy flow (on the VPS)
+
+```
+git clone ... && cd Mosquitto-Broker-RBPi
+cp .env.example .env && nano .env
+bash init.sh
+docker compose up -d
+docker compose ps
+bash test.sh
+```
+
+No host packages installed, no systemd units touched, no files in /etc. Full
+rollback is `docker compose down && rm -rf data/ .env`.
+
 ## CHANGE-002 — Consolidate setup_coturn.sh into setup.sh
 
 **Date:** 2026-04-08

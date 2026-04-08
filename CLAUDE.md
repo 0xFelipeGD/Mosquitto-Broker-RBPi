@@ -1,17 +1,20 @@
-# Mosquitto-Broker-RBPi — MQTT Broker
+# Mosquitto-Broker-RBPi — MQTT Broker (Dockerized)
 
 ## Overview
 
-Automated setup for Eclipse Mosquitto 2.0+ MQTT broker on a VPS Ubuntu server. Provides TLS-encrypted, password-authenticated message routing between the RCS (operator PC) and UGV (Raspberry Pi).
+Containerized deployment of Eclipse Mosquitto 2.0+ MQTT broker and Coturn STUN/TURN relay for the RCS <-> UGV system. Runs on a VPS Ubuntu server via `docker compose`.
 
 ## Architecture
 
-- **Mosquitto 2.0+** installed from official PPA (not Docker)
-- **TLS only** on port 8883 (port 1883 blocked by firewall)
-- **Password auth** via `mosquitto_passwd` (2 users)
-- **Optional ACL** for per-topic access control
-- **UFW firewall** configured automatically
-- **Systemd** managed (`systemctl start/stop/restart mosquitto`)
+- **docker compose** two-service stack: `mosquitto` + `coturn`
+- **Eclipse Mosquitto 2** (official `eclipse-mosquitto:2` image) on bridge network, port 8883 exposed
+- **Coturn** (official `coturn/coturn:latest` image) with `network_mode: host` — required for TURN relay port range
+- **TLS only** on port 8883 (plaintext 1883 is never bound)
+- **Password auth** via `mosquitto_passwd` run inside the image itself (no host install)
+- **ACL** for per-topic access control (always on — matches INTERFACE_CONTRACT.md)
+- **Self-signed TLS** by default (Let's Encrypt is planned as a future sidecar)
+- **Healthchecks** for both services so `docker compose ps` shows real status
+- **UFW firewall** is the operator's responsibility (documented in README.md)
 
 ## MQTT Interface
 
@@ -32,29 +35,34 @@ Automated setup for Eclipse Mosquitto 2.0+ MQTT broker on a VPS Ubuntu server. P
 | `ugv/camera/status` | read | write |
 | `$SYS/#` | read | read |
 
+A third user, `health` (default), has read-only access to `$SYS/broker/uptime` and exists only to back the mosquitto container healthcheck.
+
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `setup.sh` | Full automated installer (Mosquitto, TLS, users, ACL, firewall, optional coturn) |
-| `test.sh` | Connectivity and pub/sub validation |
-| `uninstall.sh` | Clean removal |
-| `prompts/VPS_BROKER_SETUP.md` | Detailed implementation guide |
+| `docker-compose.yml` | Two-service stack with healthchecks and restart policies |
+| `.env.example` | Template for all secrets and runtime settings |
+| `init.sh` | Bootstrap: reads `.env`, produces everything under `data/` |
+| `test.sh` | Docker-aware smoke test (compose ps + TLS pub/sub + coturn UDP check) |
+| `uninstall.sh` | Legacy cleanup for pre-Docker installs |
+| `prompts/VPS_BROKER_SETUP.md` | Original manual implementation guide (historical) |
 
-## TLS Modes
-
-1. **Let's Encrypt** — Automated via Certbot with renewal hook
-2. **Self-Signed** — OpenSSL CA + server cert (10-year validity)
-
-## Key Paths on VPS
+## Generated paths (on the VPS, inside `./data/`)
 
 | Path | Content |
 |------|---------|
-| `/etc/mosquitto/conf.d/rcs.conf` | Main Mosquitto config |
-| `/etc/mosquitto/passwd` | Hashed password file |
-| `/etc/mosquitto/acl` | Topic ACL rules (optional) |
-| `/etc/mosquitto/certs/` | TLS certificates |
-| `/etc/mosquitto/.credentials` | Plaintext credentials backup (chmod 600) |
+| `data/certs/ca.crt, server.crt, server.key` | Self-signed TLS material |
+| `data/mosquitto/config/mosquitto.conf` | Top-level include_dir shim |
+| `data/mosquitto/config/conf.d/rcs.conf` | Listener, TLS, auth, ACL, tuning |
+| `data/mosquitto/config/passwd` | Hashed MQTT passwords |
+| `data/mosquitto/config/acl` | Topic ACL rules |
+| `data/mosquitto/data/` | Persistence |
+| `data/mosquitto/log/` | Broker logs |
+| `data/coturn/turnserver.conf` | Coturn config |
+| `data/coturn/log/turnserver.log` | Coturn logs |
+
+`data/` and `.env` are both in `.gitignore` — nothing in them should ever be committed.
 
 ## Configuration Limits
 
@@ -66,7 +74,15 @@ Automated setup for Eclipse Mosquitto 2.0+ MQTT broker on a VPS Ubuntu server. P
 ## Running
 
 ```bash
-sudo bash setup.sh         # Single wizard: Mosquitto + optional coturn STUN+TURN
-bash test.sh               # Test connectivity (includes coturn check)
-sudo bash uninstall.sh     # Clean removal
+cp .env.example .env                # one-time
+nano .env                           # fill in VPS_EXTERNAL_IP + passwords
+bash init.sh                        # populate data/
+docker compose up -d                # start both services
+docker compose ps                   # should show "running (healthy)"
+bash test.sh                        # pub/sub round trip + coturn check
+docker compose logs -f mosquitto    # live logs
+docker compose restart mosquitto    # after editing .env + rerunning init.sh
+docker compose down                 # stop
 ```
+
+Password rotation: edit `.env`, `bash init.sh`, `docker compose restart mosquitto`.
