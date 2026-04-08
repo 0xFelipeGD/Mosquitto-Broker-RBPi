@@ -65,13 +65,16 @@ services:
       - ./data/coturn/turnserver.conf:/etc/turnserver.conf:ro
       - ./data/coturn/log:/var/log
     healthcheck:
-      # turnserver binds BOTH TCP and UDP on the listening-port. We use the
-      # TCP check because `nc -zu` for UDP is unreliable — UDP has no
-      # handshake, so the test depends on an ICMP port-unreachable being
-      # returned when the port is closed, which many firewalls drop. TCP
-      # 3478 is the canonical liveness signal: if turnserver is alive, it's
-      # bound there.
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 3478 || exit 1"]
+      # coturn/coturn is a Debian slim image and does NOT include nc/netcat,
+      # so the previous `nc -z` check returned 127 (command not found) and
+      # flagged the container unhealthy even when turnserver was fine.
+      #
+      # Use turnutils_stunclient instead — it ships with the coturn package
+      # itself (always present in this image) and performs a real STUN
+      # binding request against the local listener. Exit 0 means the server
+      # is alive, bound, and responding to STUN. Wrapped in `timeout 3` to
+      # bound the wall-clock time against the 5s healthcheck budget.
+      test: ["CMD-SHELL", "timeout 3 turnutils_stunclient -p 3478 127.0.0.1 >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
