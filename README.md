@@ -1,109 +1,153 @@
-# Mosquitto MQTT Broker — VPS Setup
+# Mosquitto MQTT Broker + Coturn — Dockerized VPS Stack
 
-Automated setup wizard for deploying a secure Eclipse Mosquitto MQTT broker on a VPS.
-Part of the RCS (Remote Control Station) <-> UGV (Unmanned Ground Vehicle) communication system.
+Containerized deployment of the RCS <-> UGV message broker. Runs two services via `docker compose`:
 
-## Architecture
+- **mosquitto** — Eclipse Mosquitto 2 with TLS 1.2+ on port 8883
+- **coturn** — STUN + TURN relay on port 3478 for WebRTC video NAT traversal
 
+All runtime state (certs, password file, ACLs, persistence, logs) lives under `./data/` and is produced by `init.sh` from a single `.env` file.
+
+## Quick deploy (recommended)
+
+On a fresh Ubuntu/Debian VPS, three commands take you from "nothing installed" to "two healthy containers + firewall rules in place":
+
+```bash
+ssh root@<VPS_IP>
+git clone -b feature/broker-docker https://github.com/0xFelipeGD/Mosquitto-Broker-RBPi.git
+cd Mosquitto-Broker-RBPi
+bash deploy.sh
 ```
-[RCS - Linux PC]                       [Raspberry Pi - UGV]
-  paho-mqtt client                       paho-mqtt client
-       |                                      |
-       |  TLS (port 8883)                     |  TLS (port 8883)
-       +------------>  [VPS - Mosquitto]  <---+
-```
 
-## Quick Start
+`deploy.sh` is an interactive wizard that:
 
-SSH into your VPS and run:
+- Installs Docker + the compose plugin (if missing)
+- Detects and offers to remove any prior native mosquitto/coturn install
+- Builds `.env` interactively (auto-detects the public IP, generates a strong TURN password)
+- Runs `init.sh` to generate certs, configs, ACL, passwd
+- Brings the stack up with `docker compose up -d` and waits until both containers report `healthy`
+- Configures UFW firewall rules
+- Runs `test.sh` to validate end-to-end TLS pub/sub
+- Prints credentials, URLs, and the next steps
+
+For non-interactive use (CI/CD), run `bash deploy.sh --non-interactive` with `VPS_EXTERNAL_IP`, `RCS_OPERATOR_PASSWORD`, and `UGV_CLIENT_PASSWORD` set in the environment.
+
+The manual flow below remains supported for advanced users who want to control each step.
+
+## Requirements
+
+- Docker 20.10+ with the `compose` plugin (`docker compose version`)
+- `openssl` (used by `init.sh` to generate self-signed certs)
+- Outbound internet access to pull the two images on first run
+
+## Manual deploy (advanced)
 
 ```bash
 git clone https://github.com/0xFelipeGD/Mosquitto-Broker-RBPi.git
 cd Mosquitto-Broker-RBPi
-sudo ./setup.sh
+cp .env.example .env
+nano .env                      # fill in VPS_EXTERNAL_IP + the two passwords
+bash init.sh                   # generate certs, configs, passwd, acl
+docker compose up -d
+docker compose ps              # both services should show "running (healthy)"
+bash test.sh                   # pub/sub round trip + coturn check
 ```
 
-The wizard will ask you:
-
-1. **TLS mode** — Let's Encrypt (need a domain) or self-signed (works with IP)
-2. **Passwords** — for `rcs_operator` and `ugv_client` MQTT users
-3. **ACL** — enable topic-level access control (recommended)
-4. **Coturn STUN+TURN** — install for WebRTC video NAT traversal (recommended)
-5. **Firewall** — configure UFW (recommended)
-
-That's it. Everything else is automatic — Mosquitto and Coturn are installed by the same script in a single run.
-
-## What the wizard does
-
-- Installs Mosquitto 2.0+ from the official PPA
-- Generates or obtains TLS certificates
-- Creates MQTT users with password authentication
-- Writes a hardened broker configuration (TLS-only on port 8883)
-- Sets up topic ACLs matching the RCS/UGV topic contract
-- Optionally installs and configures **coturn** as a STUN+TURN server on port 3478 for the UGV camera WebRTC feed (TURN credentials: `ugv` / `ugvturn2026`, relay ports `49152-65535/udp`)
-- Configures UFW firewall (blocks plaintext MQTT on 1883, opens 8883/tcp and the coturn ports when enabled)
-- Runs a self-test to verify pub/sub over TLS
-- Saves credentials to `/etc/mosquitto/.credentials`
-
-## After Setup
-
-### Verify the broker
+Copy `data/certs/ca.crt` to each client (RCS PC and UGV Pi):
 
 ```bash
-sudo ./test.sh
+# From your local workstation (not inside the VPS):
+scp root@YOUR_VPS_IP:/path/to/Mosquitto-Broker-RBPi/data/certs/ca.crt .
 ```
 
-Runs a full test suite: service status, port checks, TLS cert, pub/sub in both directions, and security tests (anonymous/wrong password rejection).
+## UFW rules required on the VPS
 
-> **Self-signed certs:** the script uses `--insecure` to bypass hostname verification on the loopback interface (the cert is issued for the VPS external IP, not `localhost`). TLS encryption and CA chain validation remain active. This is expected and correct for a local functional test.
-
-### Connect the RCS
-
-In your RCS `config/config.yaml`:
-
-```yaml
-mqtt:
-  host: "mqtt.yourdomain.com"    # or VPS IP
-  port: 8883
-  username: "rcs_operator"
-  password: "YOUR_PASSWORD"
-  tls:
-    enabled: true
-    ca_certs: ""                  # empty for Let's Encrypt (uses system CAs)
-    # ca_certs: "/path/to/ca.crt" # needed for self-signed
-```
-
-### Self-signed certs
-
-If you used self-signed TLS, copy the CA cert to each client machine:
+The stack does not touch the host firewall. Open these ports yourself:
 
 ```bash
-# Run this on your LOCAL machine (not inside the VPS SSH session)
-scp root@YOUR_VPS_IP:/etc/mosquitto/certs/ca.crt .
+sudo ufw allow 22/tcp                  # ssh (don't lock yourself out)
+sudo ufw allow 8883/tcp                # MQTT over TLS
+sudo ufw deny 1883/tcp                 # plaintext MQTT — always blocked
+sudo ufw allow 3478/udp                # STUN/TURN
+sudo ufw allow 3478/tcp                # STUN/TURN (TCP fallback)
+sudo ufw allow 49152:65535/udp         # TURN relay range
+sudo ufw enable
 ```
 
-### Useful commands
+## Operations
 
 ```bash
-sudo systemctl status mosquitto       # Service status
-sudo journalctl -u mosquitto -f       # Live logs
-sudo ./test.sh                        # Run test suite
-sudo ./uninstall.sh                   # Remove everything
+docker compose ps                      # status + health
+docker compose logs -f mosquitto       # live mosquitto logs
+docker compose logs -f coturn          # live coturn logs
+docker compose restart mosquitto       # restart after config edit
+docker compose down                    # stop the stack
+docker compose up -d                   # bring it back up
 ```
 
-## Uninstall
+### Rotating MQTT passwords
+
+1. Edit `.env` (change `RCS_OPERATOR_PASSWORD` / `UGV_CLIENT_PASSWORD`)
+2. `bash init.sh` — regenerates `data/mosquitto/config/passwd`
+3. `docker compose restart mosquitto`
+
+### Updating
 
 ```bash
-sudo ./uninstall.sh
+git pull
+docker compose pull
+docker compose up -d
 ```
 
-Removes Mosquitto, config, certs, users, and firewall rules. Requires typing `YES` to confirm.
+## Troubleshooting
+
+### mosquitto healthcheck is failing
+
+- Inspect: `docker compose logs mosquitto`
+- Common causes: wrong `VPS_EXTERNAL_IP` in `.env` (cert SAN mismatch), missing `HEALTH_PASSWORD`, stale `data/mosquitto/config/passwd`
+- Fix: edit `.env`, re-run `bash init.sh`, then `docker compose restart mosquitto`
+
+### coturn healthcheck is failing
+
+- Inspect: `docker compose logs coturn`
+- Check UFW: `sudo ufw status | grep 3478`
+- Coturn runs with `network_mode: host` — this is intentional so the relay port range works. If port 3478 is already in use on the host, nothing will start.
+
+### TLS certificate expired / needs regeneration
+
+```bash
+rm data/certs/ca.crt data/certs/server.crt data/certs/server.key
+bash init.sh
+docker compose restart mosquitto
+```
+
+Then redistribute `data/certs/ca.crt` to each client.
+
+### Port conflict on 8883, 3478, or 49152-65535
+
+Another service is already bound. Stop it or edit the host ports. For 8883 change the `ports:` mapping in `docker-compose.yml`; for coturn you must stop the host-side conflicting process (coturn uses `network_mode: host`).
+
+### I need to start from scratch
+
+```bash
+docker compose down
+rm -rf data/
+bash init.sh
+docker compose up -d
+```
+
+This nukes certs, persistence, and logs. `.env` is preserved.
 
 ## Files
 
-| File | Purpose |
+| Path | Purpose |
 |------|---------|
-| `setup.sh` | Interactive setup wizard |
-| `test.sh` | Post-setup test suite |
-| `uninstall.sh` | Clean uninstall |
-| `VPS_BROKER_SETUP.md` | Full manual reference (for engineers/AI) |
+| `deploy.sh` | One-shot wizard: Docker install, .env build, init, up, UFW, smoke test |
+| `docker-compose.yml` | Two-service stack (mosquitto + coturn) with healthchecks |
+| `.env.example` | Template for secrets and settings |
+| `init.sh` | Bootstrap: populates `data/` from `.env` |
+| `test.sh` | Docker-aware smoke test |
+| `data/` | Generated at runtime (gitignored — contains secrets) |
+
+## MQTT interface contract
+
+See `../INTERFACE_CONTRACT.md` for the authoritative topic list, payload schemas, and ACL matrix. Any change to topics or permissions must be made there first, then propagated into `init.sh`'s ACL generator.
