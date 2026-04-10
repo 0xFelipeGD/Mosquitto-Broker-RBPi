@@ -11,7 +11,7 @@
 # Uses the host's mosquitto_pub/mosquitto_sub if present, otherwise falls back
 # to `docker compose exec mosquitto ...`.
 # =============================================================================
-set -uo pipefail
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"

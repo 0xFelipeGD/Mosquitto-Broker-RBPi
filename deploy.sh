@@ -27,6 +27,7 @@
 #           CLEANUP_LEGACY (yes/no), CONFIGURE_UFW (yes/no)
 # =============================================================================
 set -euo pipefail
+# Restrict word splitting to newline+tab so variable expansion inside `read -r` / `ask()` helpers does not split on spaces in user input
 IFS=$'\n\t'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
