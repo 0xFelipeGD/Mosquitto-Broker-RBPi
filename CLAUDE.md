@@ -46,7 +46,6 @@ A third user, `health` (default), has read-only access to `$SYS/broker/uptime` a
 | `.env.example` | Template for all secrets and runtime settings |
 | `init.sh` | Bootstrap: reads `.env`, produces everything under `data/` |
 | `test.sh` | Docker-aware smoke test (compose ps + TLS pub/sub + coturn UDP check) |
-| `prompts/VPS_BROKER_SETUP.md` | Original manual implementation guide (historical) |
 
 ## Generated paths (on the VPS, inside `./data/`)
 

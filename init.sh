@@ -41,8 +41,8 @@ if [[ ! -f .env ]]; then
     exit 1
 fi
 
-# shellcheck disable=SC1091
 set -a
+# shellcheck disable=SC1091
 source .env
 set +a
 
@@ -234,6 +234,7 @@ TMP_PASSWD_FILE="$TMP_PASSWD_DIR/passwd"
 
 docker_passwd_add() {
     local user="$1" pass="$2" create_flag="${3:-}"
+    # shellcheck disable=SC2086  # create_flag is intentionally unquoted: empty → no arg, "-c" → one arg
     docker run --rm \
         --user "$(id -u):$(id -g)" \
         -v "$TMP_PASSWD_DIR:/work" \

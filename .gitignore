@@ -1,5 +1,21 @@
-# Environment secrets — never commit
+# ── Secrets & generated data ──────────────────────────────────────────────────
 .env
-
-# Runtime data populated by init.sh (certs, passwd, ACLs, logs, persistence)
+*.env
+!.env.example
 data/
+certs/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+
+# ── Backups / temp ────────────────────────────────────────────────────────────
+*.bak
+*.tmp
+
+# ── OS & editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
