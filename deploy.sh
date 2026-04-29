@@ -5,7 +5,7 @@
 # Usage (on a fresh VPS):
 #
 #   ssh root@<VPS_IP>
-#   git clone -b feature/broker-docker https://github.com/0xFelipeGD/Mosquitto-Broker-RBPi.git
+#   git clone https://github.com/0xFelipeGD/Mosquitto-Broker-RBPi.git
 #   cd Mosquitto-Broker-RBPi
 #   bash deploy.sh
 #
