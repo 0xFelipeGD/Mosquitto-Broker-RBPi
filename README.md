@@ -13,7 +13,7 @@ On a fresh Ubuntu/Debian VPS, three commands take you from "nothing installed" t
 
 ```bash
 ssh root@<VPS_IP>
-git clone -b feature/broker-docker https://github.com/0xFelipeGD/Mosquitto-Broker-RBPi.git
+git clone https://github.com/0xFelipeGD/Mosquitto-Broker-RBPi.git
 cd Mosquitto-Broker-RBPi
 bash deploy.sh
 ```
